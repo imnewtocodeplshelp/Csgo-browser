@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dust2 FPS Multiplayer - Health System</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; touch-action: none; font-family: monospace; user-select: none; }
+        
+        /* Loading screen */
+        #loading {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            color: #0f0; font-size: 24px; z-index: 1000; transition: opacity 0.5s;
+        }
+        #loading.hidden { opacity: 0; pointer-events: none; }
+        .spinner {
+            border: 4px solid rgba(0, 255, 0, 0.1);
+            border-top: 4px solid #0f0; border-radius: 50%;
+            width: 60px; height: 60px; animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* UI */
+        #ui { 
+            position: absolute; top: 10px; left: 10px; color: #0f0; 
+            pointer-events: none; text-shadow: 2px 2px #000; font-size: 14px; z-index: 10;
+            line-height: 1.5;
+        }
+        
+        /* Health bar */
+        #health-container {
+            position: absolute; bottom: 30px; left: 50%;
+            transform: translateX(-50%); z-index: 10;
+            pointer-events: none;
+        }
+        #health-bar {
+            width: 300px; height: 30px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 3px solid rgba(255, 255, 255, 0.5);
+            border-radius: 5px; overflow: hidden;
+        }
+        #health-fill {
+            height: 100%; background: linear-gradient(to right, #ff0000, #00ff00);
+            transition: width 0.3s; width: 100%;
+        }
+        #health-text {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            color: white; font-size: 18px; font-weight: bold;
+            text-shadow: 2px 2px 4px #000;
+        }
+        
+        /* Kill feed */
+        #kill-feed {
+            position: absolute; top: 10px; right: 10px;
+            z-index: 10; pointer-events: none;
+            text-align: right;
+        }
+        .kill-message {
+            color: #fff; font-size: 14px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 5px 10px; margin-bottom: 5px;
+            border-radius: 5px;
+            animation: fadeIn 0.3s, fadeOut 0.5s 4.5s;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateX(20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes fadeOut {
+            to { opacity: 0; }
+        }
+        
+        /* Death screen */
+        #death-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(139, 0, 0, 0.7);
+            display: none; flex-direction: column;
+            align-items: center; justify-content: center;
+            z-index: 500; animation: fadeIn 0.5s;
+        }
+        #death-screen.show { display: flex; }
+        #death-screen h1 {
+            color: #fff; font-size: 72px; margin: 0;
+            text-shadow: 4px 4px 8px #000;
+        }
+        #death-screen p {
+            color: #fff; font-size: 24px;
+            text-shadow: 2px 2px 4px #000;
+        }
+        
+        /* Damage flash */
+        #damage-flash {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 0, 0, 0.3);
+            pointer-events: none; opacity: 0;
+            z-index: 100; transition: opacity 0.1s;
+        }
+        #damage-flash.show { opacity: 1; }
+        
+        /* Crosshair */
+        #crosshair { 
+            position: absolute; top: 50%; left: 50%; width: 24px; height: 24px; 
+            transform: translate(-50%, -50%); pointer-events: none; z-index: 8;
+        }
+        #crosshair::before, #crosshair::after { 
+            content: ''; position: absolute; background: #0f8; box-shadow: 0 0 5px #0f8;
+        }
+        #crosshair::before { top: 50%; left: -10px; width: 44px; height: 2px; }
+        #crosshair::after { left: 50%; top: -10px; width: 2px; height: 44px; }
+        #crosshair.hit::before, #crosshair.hit::after {
+            background: #f00; box-shadow: 0 0 10px #f00;
+        }
+
+        /* Touch zones - full half-screen each */
+        .touch-zone { 
+            position: absolute; bottom: 0; width: 50%; height: 100%; 
+            z-index: 5; 
+        }
+        #left-zone { left: 0; }
+        #right-zone { right: 0; }
+
+        /* Floating joystick - hidden by default, appears on touch */
+        .joystick-base { 
+            width: 120px; height: 120px; 
+            background: rgba(255,255,255,0.08); 
+            border: 2px solid rgba(255,255,255,0.25); 
+            border-radius: 50%; 
+            position: absolute; 
+            pointer-events: none;
+            display: none;
+            transform: translate(-50%, -50%);
+        }
+        .joystick-base.active { display: block; }
+        .knob { 
+            width: 50px; height: 50px; 
+            background: rgba(255,255,255,0.5); 
+            border: 2px solid rgba(255,255,255,0.8); 
+            border-radius: 50%; 
+            position: absolute; 
+            top: 50%; left: 50%; 
+            transform: translate(-50%, -50%); 
+            pointer-events: none;
+            box-shadow: 0 0 10px rgba(255,255,255,0.3);
+        }
+
+        /* Buttons */
+        #fire-btn { 
+            position: absolute; bottom: 220px; right: 50px; width: 90px; height: 90px; 
+            background: rgba(220, 40, 40, 0.45); border: 3px solid rgba(255,255,255,0.5); 
+            border-radius: 50%; color: white; font-weight: bold; font-size: 18px; 
+            display: flex; align-items: center; justify-content: center; z-index: 15; 
+            touch-action: manipulation;
+        }
+        #jump-btn { 
+            position: absolute; bottom: 130px; right: 50px; width: 70px; height: 70px; 
+            background: rgba(40, 140, 220, 0.45); border: 3px solid rgba(255,255,255,0.5); 
+            border-radius: 50%; color: white; font-weight: bold; font-size: 16px; 
+            display: flex; align-items: center; justify-content: center; z-index: 15; 
+            touch-action: manipulation;
+        }
+        
+        /* Scoreboard */
+        #scoreboard {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            border: 3px solid rgba(255, 255, 255, 0.5);
+            border-radius: 10px; padding: 20px;
+            color: #fff; display: none; z-index: 600;
+            min-width: 400px;
+        }
+        #scoreboard.show { display: block; }
+        #scoreboard h2 { margin: 0 0 15px 0; text-align: center; }
+        .score-row {
+            display: flex; justify-content: space-between;
+            padding: 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .score-row.header { font-weight: bold; background: rgba(255, 255, 255, 0.1); }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="spinner"></div>
+        <div>Loading Game...</div>
+    </div>
+    
+    <div id="ui">Loading...</div>
+    <div id="crosshair"></div>
+    <div id="damage-flash"></div>
+    
+    <!-- Health bar -->
+    <div id="health-container">
+        <div id="health-bar">
+            <div id="health-fill"></div>
+        </div>
+        <div id="health-text">100</div>
+    </div>
+    
+    <!-- Kill feed -->
+    <div id="kill-feed"></div>
+    
+    <!-- Death screen -->
+    <div id="death-screen">
+        <h1>YOU DIED</h1>
+        <p id="death-message">Killed by Player</p>
+        <p>Respawning in <span id="respawn-timer">3</span> seconds...</p>
+    </div>
+    
+    <!-- Scoreboard (press TAB) -->
+    <div id="scoreboard">
+        <h2>📊 SCOREBOARD</h2>
+        <div id="scoreboard-content"></div>
+    </div>
+    
+    <!-- Controls -->
+    <div id="fire-btn">FIRE</div>
+    <div id="jump-btn">JUMP</div>
+    <div id="left-zone" class="touch-zone"></div>
+    <div id="right-zone" class="touch-zone"></div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // ═══════════════════════════════════════════════════════════
+        // CONFIGURATION
+        // ═══════════════════════════════════════════════════════════
+        const CONFIG = {
+            PLAYER: {
+                HEIGHT: 1.8,
+                RADIUS: 0.4,
+                MOVE_SPEED: 0.15,
+                JUMP_VELOCITY: 0.25,
+                GRAVITY: 0.015
+            },
+            BULLET: {
+                SPEED: 1.5,
+                RADIUS: 0.08,
+                COLOR: 0xffff00,
+                COLOR_OTHER: 0xff4444
+            },
+            CAMERA: {
+                FOV: 75,
+                NEAR: 0.1,
+                FAR: 1000
+            },
+            NETWORK: {
+                UPDATE_INTERVAL: 50
+            },
+            CONTROLS: {
+                MOUSE_SENSITIVITY: 0.002,
+                JOYSTICK_MOVE_MULTIPLIER: 1.5,
+                JOYSTICK_LOOK_SPEED_X: 0.05,
+                JOYSTICK_LOOK_SPEED_Y: 0.04
+            },
+            MAP: {
+                DESIRED_SIZE: 300,
+                Y_OFFSET: -1
+            }
+        };
+
+        // ═══════════════════════════════════════════════════════════
+        // INITIALIZATION
+        // ═══════════════════════════════════════════════════════════
+        const socket = io();
+        let myId = null;
+        
+        // Scene & Camera
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        scene.fog = new THREE.Fog(0x87CEEB, 50, 300);
+
+        const camera = new THREE.PerspectiveCamera(
+            CONFIG.CAMERA.FOV, 
+            window.innerWidth / window.innerHeight, 
+            CONFIG.CAMERA.NEAR, 
+            CONFIG.CAMERA.FAR
+        );
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+        const sun = new THREE.DirectionalLight(0xffddaa, 1);
+        sun.position.set(50, 100, 50);
+        sun.castShadow = true;
+        sun.shadow.mapSize.width = 2048;
+        sun.shadow.mapSize.height = 2048;
+        scene.add(sun);
+
+        // ═══════════════════════════════════════════════════════════
+        // GAME STATE
+        // ═══════════════════════════════════════════════════════════
+        const collidableObjects = [];
+        const bullets = {}; // Server manages bullets, we just display them
+        const otherPlayers = {};
+        let yaw = 0, pitch = 0;
+        let velocityY = 0;
+        let canJump = false;
+        let myHealth = 100;
+        let isAlive = true;
+        let playerStats = {}; // Store kills/deaths for scoreboard
+
+        // Network throttling
+        let lastEmit = 0;
+
+        // Debug stats
+        const stats = {
+            fps: 0,
+            frameCount: 0,
+            lastTime: Date.now()
+        };
+
+        // ═══════════════════════════════════════════════════════════
+        // UI FUNCTIONS
+        // ═══════════════════════════════════════════════════════════
+        function updateHealthBar(health) {
+            myHealth = Math.max(0, Math.min(100, health));
+            const healthFill = document.getElementById('health-fill');
+            const healthText = document.getElementById('health-text');
+            
+            healthFill.style.width = myHealth + '%';
+            healthText.textContent = Math.round(myHealth);
+            
+            // Change color based on health
+            if (myHealth > 66) {
+                healthFill.style.background = 'linear-gradient(to right, #44ff44, #00ff00)';
+            } else if (myHealth > 33) {
+                healthFill.style.background = 'linear-gradient(to right, #ffaa00, #ffff00)';
+            } else {
+                healthFill.style.background = 'linear-gradient(to right, #ff0000, #ff4444)';
+            }
+        }
+
+        function showDamageFlash() {
+            const flash = document.getElementById('damage-flash');
+            flash.classList.add('show');
+            setTimeout(() => flash.classList.remove('show'), 100);
+            
+            // Hit marker on crosshair
+            const crosshair = document.getElementById('crosshair');
+            crosshair.classList.add('hit');
+            setTimeout(() => crosshair.classList.remove('hit'), 200);
+        }
+
+        function addKillFeedMessage(message) {
+            const feed = document.getElementById('kill-feed');
+            const msg = document.createElement('div');
+            msg.className = 'kill-message';
+            msg.textContent = message;
+            feed.appendChild(msg);
+            
+            // Remove after 5 seconds
+            setTimeout(() => msg.remove(), 5000);
+        }
+
+        function showDeathScreen(killerName) {
+            const deathScreen = document.getElementById('death-screen');
+            const deathMessage = document.getElementById('death-message');
+            deathMessage.textContent = `Killed by ${killerName}`;
+            deathScreen.classList.add('show');
+            
+            // Countdown timer
+            let countdown = 3;
+            const timerEl = document.getElementById('respawn-timer');
+            const interval = setInterval(() => {
+                countdown--;
+                timerEl.textContent = countdown;
+                if (countdown <= 0) {
+                    clearInterval(interval);
+                }
+            }, 1000);
+        }
+
+        function hideDeathScreen() {
+            document.getElementById('death-screen').classList.remove('show');
+        }
+
+        function updateScoreboard(players) {
+            const content = document.getElementById('scoreboard-content');
+            
+            // Create header
+            let html = '<div class="score-row header"><span>Player</span><span>K / D</span></div>';
+            
+            // Sort by kills
+            const sorted = Object.entries(players).sort((a, b) => (b[1].kills || 0) - (a[1].kills || 0));
+            
+            for (const [id, player] of sorted) {
+                const name = id === myId ? 'You' : id.substring(0, 8);
+                const kills = player.kills || 0;
+                const deaths = player.deaths || 0;
+                html += `<div class="score-row"><span>${name}</span><span>${kills} / ${deaths}</span></div>`;
+            }
+            
+            content.innerHTML = html;
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // MAP LOADING
+        // ═══════════════════════════════════════════════════════════
+        async function loadMap() {
+            const loader = new GLTFLoader();
+            try {
+                console.log('Loading map...');
+                const gltf = await loader.loadAsync('./de_dust2_-_cs_map.glb');
+                const map = gltf.scene;
+
+                const box = new THREE.Box3().setFromObject(map);
+                const size = box.getSize(new THREE.Vector3());
+                const center = box.getCenter(new THREE.Vector3());
+
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const scaleFactor = CONFIG.MAP.DESIRED_SIZE / maxDim;
+                map.scale.multiplyScalar(scaleFactor);
+                map.position.sub(center.multiplyScalar(scaleFactor));
+                map.position.y += CONFIG.MAP.Y_OFFSET;
+
+                map.traverse(child => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                        collidableObjects.push(child);
+                    }
+                });
+
+                scene.add(map);
+                console.log('✅ Map loaded!');
+                camera.position.set(0, 20, 0);
+                
+                setTimeout(() => {
+                    document.getElementById('loading').classList.add('hidden');
+                }, 500);
+                
+            } catch (err) {
+                console.error('❌ Map load failed:', err);
+                
+                const floor = new THREE.Mesh(
+                    new THREE.PlaneGeometry(1000, 1000),
+                    new THREE.MeshStandardMaterial({ color: 0x666666 })
+                );
+                floor.rotation.x = -Math.PI / 2;
+                floor.receiveShadow = true;
+                scene.add(floor);
+                collidableObjects.push(floor);
+                
+                setTimeout(() => {
+                    document.getElementById('loading').classList.add('hidden');
+                }, 1000);
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // JOYSTICK CONTROLS - Floating style (appears where you touch)
+        // ═══════════════════════════════════════════════════════════
+        const sticks = {
+            move: { x: 0, y: 0, id: null, originX: 0, originY: 0 },
+            look: { x: 0, y: 0, id: null, originX: 0, originY: 0 }
+        };
+
+        // Create joystick elements for each zone
+        function setupJoystick(zoneId, key) {
+            const zone = document.getElementById(zoneId);
+            const base = document.createElement('div');
+            base.className = 'joystick-base';
+            const knob = document.createElement('div');
+            knob.className = 'knob';
+            base.appendChild(knob);
+            zone.appendChild(base);
+
+            zone.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                for (let t of e.changedTouches) {
+                    if (sticks[key].id === null) {
+                        sticks[key].id = t.identifier;
+                        sticks[key].originX = t.clientX;
+                        sticks[key].originY = t.clientY;
+
+                        // Show base at touch position
+                        const zoneRect = zone.getBoundingClientRect();
+                        base.style.left = (t.clientX - zoneRect.left) + 'px';
+                        base.style.top  = (t.clientY - zoneRect.top)  + 'px';
+                        base.classList.add('active');
+                    }
+                }
+            }, { passive: false });
+
+            zone.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                for (let t of e.changedTouches) {
+                    if (t.identifier === sticks[key].id) {
+                        const maxDist = 50;
+                        const dx = t.clientX - sticks[key].originX;
+                        const dy = t.clientY - sticks[key].originY;
+                        const dist = Math.min(maxDist, Math.hypot(dx, dy));
+                        const angle = Math.atan2(dy, dx);
+
+                        sticks[key].x = (Math.cos(angle) * dist) / maxDist;
+                        sticks[key].y = (Math.sin(angle) * dist) / maxDist;
+
+                        // Move knob visually
+                        knob.style.transform = `translate(calc(-50% + ${Math.cos(angle) * dist}px), calc(-50% + ${Math.sin(angle) * dist}px))`;
+                    }
+                }
+            }, { passive: false });
+
+            zone.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                for (let t of e.changedTouches) {
+                    if (t.identifier === sticks[key].id) {
+                        sticks[key].id = null;
+                        sticks[key].x = 0;
+                        sticks[key].y = 0;
+                        base.classList.remove('active');
+                        knob.style.transform = 'translate(-50%, -50%)';
+                    }
+                }
+            }, { passive: false });
+
+            zone.addEventListener('touchcancel', (e) => {
+                sticks[key].id = null;
+                sticks[key].x = 0;
+                sticks[key].y = 0;
+                base.classList.remove('active');
+                knob.style.transform = 'translate(-50%, -50%)';
+            });
+        }
+
+        setupJoystick('left-zone', 'move');
+        setupJoystick('right-zone', 'look');
+
+        // ═══════════════════════════════════════════════════════════
+        // SHOOTING
+        // ═══════════════════════════════════════════════════════════
+        function fireBullet() {
+            if (!isAlive) return;
+            
+            const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            
+            socket.emit('fireBullet', { 
+                pos: camera.position.clone(),
+                dir: dir
+            });
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // DESKTOP CONTROLS
+        // ═══════════════════════════════════════════════════════════
+        const keys = {};
+        document.addEventListener('keydown', e => { 
+            keys[e.code] = true;
+            
+            // Show scoreboard on TAB
+            if (e.code === 'Tab') {
+                e.preventDefault();
+                document.getElementById('scoreboard').classList.add('show');
+            }
+        });
+        document.addEventListener('keyup', e => { 
+            keys[e.code] = false;
+            
+            // Hide scoreboard
+            if (e.code === 'Tab') {
+                document.getElementById('scoreboard').classList.remove('show');
+            }
+        });
+
+        document.addEventListener('click', () => {
+            if (document.pointerLockElement) fireBullet();
+            else document.body.requestPointerLock();
+        });
+
+        document.addEventListener('mousemove', e => {
+            if (document.pointerLockElement) {
+                yaw -= e.movementX * CONFIG.CONTROLS.MOUSE_SENSITIVITY;
+                pitch = THREE.MathUtils.clamp(
+                    pitch - e.movementY * CONFIG.CONTROLS.MOUSE_SENSITIVITY, 
+                    -1.4, 
+                    1.4
+                );
+            }
+        });
+
+        // ═══════════════════════════════════════════════════════════
+        // MOBILE BUTTONS
+        // ═══════════════════════════════════════════════════════════
+        document.getElementById('fire-btn').addEventListener('touchstart', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            fireBullet();
+        });
+
+        document.getElementById('jump-btn').addEventListener('touchstart', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (canJump && isAlive) {
+                velocityY = CONFIG.PLAYER.JUMP_VELOCITY;
+                canJump = false;
+            }
+        });
+
+        // ═══════════════════════════════════════════════════════════
+        // COLLISION DETECTION
+        // ═══════════════════════════════════════════════════════════
+        const raycaster = new THREE.Raycaster();
+
+        function checkGround() {
+            raycaster.set(camera.position, new THREE.Vector3(0, -1, 0));
+            raycaster.far = CONFIG.PLAYER.HEIGHT + 1;
+            const hits = raycaster.intersectObjects(collidableObjects, true);
+            if (hits.length > 0) {
+                const hitY = hits[0].point.y;
+                if (camera.position.y - hitY <= CONFIG.PLAYER.HEIGHT + 0.1) {
+                    camera.position.y = hitY + CONFIG.PLAYER.HEIGHT;
+                    velocityY = 0;
+                    canJump = true;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function checkWall(dir, dist) {
+            raycaster.set(camera.position, dir);
+            raycaster.far = dist;
+            return raycaster.intersectObjects(collidableObjects, true).length > 0;
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // MAIN GAME LOOP
+        // ═══════════════════════════════════════════════════════════
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // FPS Counter
+            stats.frameCount++;
+            const now = Date.now();
+            if (now - stats.lastTime >= 1000) {
+                stats.fps = stats.frameCount;
+                stats.frameCount = 0;
+                stats.lastTime = now;
+                
+                document.getElementById('ui').innerHTML = `
+                    FPS: ${stats.fps} | HP: ${myHealth} | Players: ${Object.keys(otherPlayers).length + 1}<br>
+                    K/D: ${playerStats[myId]?.kills || 0} / ${playerStats[myId]?.deaths || 0}<br>
+                    Press TAB for scoreboard
+                `;
+            }
+
+            if (!isAlive) {
+                renderer.render(scene, camera);
+                return;
+            }
+
+            // Look control
+            yaw -= sticks.look.x * CONFIG.CONTROLS.JOYSTICK_LOOK_SPEED_X;
+            pitch -= sticks.look.y * CONFIG.CONTROLS.JOYSTICK_LOOK_SPEED_Y;
+            pitch = THREE.MathUtils.clamp(pitch, -1.4, 1.4);
+            camera.rotation.set(pitch, yaw, 0, 'YXZ');
+
+            // Movement
+            const moveDir = new THREE.Vector3();
+
+            if (keys['KeyW']) moveDir.z -= 1;
+            if (keys['KeyS']) moveDir.z += 1;
+            if (keys['KeyA']) moveDir.x -= 1;
+            if (keys['KeyD']) moveDir.x += 1;
+
+            moveDir.x += sticks.move.x * CONFIG.CONTROLS.JOYSTICK_MOVE_MULTIPLIER;
+            moveDir.z += sticks.move.y * CONFIG.CONTROLS.JOYSTICK_MOVE_MULTIPLIER;
+
+            if (moveDir.length() > 0) {
+                moveDir.normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+                const nextPos = camera.position.clone().add(moveDir.multiplyScalar(CONFIG.PLAYER.MOVE_SPEED));
+
+                if (!checkWall(moveDir, CONFIG.PLAYER.MOVE_SPEED + CONFIG.PLAYER.RADIUS)) {
+                    camera.position.copy(nextPos);
+                }
+            }
+
+            // Gravity & jump
+            velocityY -= CONFIG.PLAYER.GRAVITY;
+            camera.position.y += velocityY;
+            checkGround();
+
+            if (keys['Space'] && canJump) {
+                velocityY = CONFIG.PLAYER.JUMP_VELOCITY;
+                canJump = false;
+            }
+
+            // Throttled multiplayer sync
+            if (now - lastEmit > CONFIG.NETWORK.UPDATE_INTERVAL) {
+                socket.emit('playerMovement', {
+                    x: camera.position.x,
+                    y: camera.position.y,
+                    z: camera.position.z,
+                    ry: yaw
+                });
+                lastEmit = now;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // MULTIPLAYER HANDLERS
+        // ═══════════════════════════════════════════════════════════
+        socket.on('init', data => {
+            myId = data.id;
+            console.log('✅ Connected as:', myId);
+            
+            // Create other players
+            Object.keys(data.players).forEach(id => {
+                if (id !== myId && !otherPlayers[id]) {
+                    otherPlayers[id] = createPlayerModel();
+                    playerStats[id] = data.players[id];
+                }
+            });
+            
+            // Create existing bullets
+            data.bullets.forEach(bulletData => {
+                if (!bullets[bulletData.id]) {
+                    bullets[bulletData.id] = createBullet(bulletData, bulletData.ownerId !== myId);
+                }
+            });
+        });
+
+        socket.on('newPlayer', d => {
+            console.log('New player:', d.id);
+            if (d.id !== myId && !otherPlayers[d.id]) {
+                otherPlayers[d.id] = createPlayerModel();
+                playerStats[d.id] = { kills: d.kills || 0, deaths: d.deaths || 0 };
+            }
+        });
+
+        socket.on('playerMoved', d => {
+            if (otherPlayers[d.id]) {
+                otherPlayers[d.id].position.set(d.x, d.y - CONFIG.PLAYER.HEIGHT, d.z);
+                otherPlayers[d.id].rotation.y = d.ry;
+            }
+        });
+
+        socket.on('playerDisconnected', id => {
+            console.log('Player disconnected:', id);
+            if (otherPlayers[id]) {
+                scene.remove(otherPlayers[id]);
+                delete otherPlayers[id];
+                delete playerStats[id];
+            }
+        });
+
+        socket.on('spawnBullet', bulletData => {
+            if (!bullets[bulletData.id]) {
+                bullets[bulletData.id] = createBullet(bulletData, bulletData.ownerId !== myId);
+            }
+        });
+
+        socket.on('bulletsUpdate', bulletsData => {
+            bulletsData.forEach(data => {
+                if (bullets[data.id]) {
+                    bullets[data.id].position.copy(data.pos);
+                }
+            });
+        });
+
+        socket.on('removeBullet', bulletId => {
+            if (bullets[bulletId]) {
+                scene.remove(bullets[bulletId]);
+                delete bullets[bulletId];
+            }
+        });
+
+        socket.on('healthUpdate', data => {
+            if (data.id === myId) {
+                updateHealthBar(data.health);
+                showDamageFlash();
+            }
+        });
+
+        socket.on('playerDied', data => {
+            if (data.id === myId) {
+                isAlive = false;
+                const killerName = data.killerId === myId ? 'yourself' : data.killerId.substring(0, 8);
+                showDeathScreen(killerName);
+            }
+            
+            const killer = data.killerId.substring(0, 8);
+            const victim = data.id === myId ? 'You' : data.id.substring(0, 8);
+            addKillFeedMessage(`${killer} eliminated ${victim}`);
+            
+            // Update stats
+            if (playerStats[data.killerId]) {
+                playerStats[data.killerId].kills = data.killerKills || 0;
+            }
+            if (playerStats[data.id]) {
+                playerStats[data.id].deaths = (playerStats[data.id].deaths || 0) + 1;
+            }
+        });
+
+        socket.on('playerRespawn', data => {
+            if (data.id === myId) {
+                isAlive = true;
+                updateHealthBar(100);
+                hideDeathScreen();
+                camera.position.set(data.x, data.y, data.z);
+                velocityY = 0;
+            }
+            
+            // Update player stats
+            playerStats[data.id] = { kills: data.kills || 0, deaths: data.deaths || 0 };
+        });
+
+        socket.on('forcePosition', pos => {
+            console.warn('Server corrected position');
+            camera.position.set(pos.x, pos.y, pos.z);
+        });
+
+        socket.on('connect', () => {
+            console.log('✅ Connected to server');
+        });
+
+        socket.on('disconnect', () => {
+            console.log('❌ Disconnected');
+        });
+
+        // ═══════════════════════════════════════════════════════════
+        // PLAYER & BULLET MODELS
+        // ═══════════════════════════════════════════════════════════
+        function createPlayerModel() {
+            const group = new THREE.Group();
+            
+            const body = new THREE.Mesh(
+                new THREE.CapsuleGeometry(CONFIG.PLAYER.RADIUS, 1.4),
+                new THREE.MeshStandardMaterial({ 
+                    color: 0x00ff88,
+                    roughness: 0.7,
+                    metalness: 0.3
+                })
+            );
+            body.position.y = 0.7;
+            body.castShadow = true;
+            body.receiveShadow = true;
+            group.add(body);
+            
+            const head = new THREE.Mesh(
+                new THREE.SphereGeometry(0.25),
+                new THREE.MeshStandardMaterial({ 
+                    color: 0xffaa00,
+                    emissive: 0xffaa00,
+                    emissiveIntensity: 0.3
+                })
+            );
+            head.position.y = 1.5;
+            head.castShadow = true;
+            group.add(head);
+            
+            scene.add(group);
+            return group;
+        }
+
+        function createBullet(bulletData, isOther) {
+            const bullet = new THREE.Mesh(
+                new THREE.SphereGeometry(CONFIG.BULLET.RADIUS),
+                new THREE.MeshBasicMaterial({ 
+                    color: isOther ? CONFIG.BULLET.COLOR_OTHER : CONFIG.BULLET.COLOR
+                })
+            );
+            bullet.position.copy(bulletData.pos);
+            scene.add(bullet);
+            return bullet;
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // START GAME
+        // ═══════════════════════════════════════════════════════════
+        console.log('🎮 Starting game...');
+        loadMap().then(() => {
+            console.log('🎮 Game started!');
+            animate();
+        });
+
+        // ═══════════════════════════════════════════════════════════
+        // WINDOW RESIZE
+        // ═══════════════════════════════════════════════════════════
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
