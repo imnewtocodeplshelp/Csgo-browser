@@ -105,6 +105,45 @@
         }
         #damage-flash.show { opacity: 1; }
         
+
+        /* ── WEAPON HUD ── */
+        #weapon-hud {
+            position: absolute; bottom: 80px; right: 20px;
+            z-index: 20; pointer-events: none; text-align: right;
+        }
+        .weapon-slot {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 7px 14px; margin: 3px 0; border-radius: 8px;
+            font-family: monospace; font-size: 13px; color: #777;
+            background: rgba(0,0,0,0.4); border: 1px solid #222;
+            transition: all 0.15s; cursor: pointer; pointer-events: all;
+        }
+        .weapon-slot.active {
+            color: #0f0; border-color: #0f0;
+            background: rgba(0,255,0,0.12);
+            box-shadow: 0 0 10px rgba(0,255,0,0.2);
+        }
+        .weapon-slot .w-key { color: #555; font-size: 11px; }
+        .weapon-slot.active .w-key { color: #0a0; }
+        .weapon-slot .w-ammo { font-size: 11px; }
+        .weapon-slot.active .w-ammo { color: #ff0; }
+        #reload-bar-container {
+            position: absolute; bottom: 68px; left: 50%;
+            transform: translateX(-50%); width: 200px;
+            display: none; z-index: 20;
+        }
+        #reload-bar-container.show { display: block; }
+        #reload-label { text-align: center; color: #ff0; font-family: monospace; font-size: 12px; margin-bottom: 4px; letter-spacing: 2px; }
+        #reload-bar { height: 4px; background: #333; border-radius: 2px; overflow: hidden; }
+        #reload-fill { height: 100%; background: #ff0; width: 0%; transition: none; }
+        /* sniper scope */
+        #scope-overlay {
+            position: absolute; inset: 0; z-index: 50;
+            display: none; pointer-events: none;
+        }
+        #scope-overlay.show { display: block; }
+        #scope-overlay canvas { width: 100%; height: 100%; }
+
         /* Crosshair */
         #crosshair { 
             position: absolute; top: 50%; left: 50%; width: 24px; height: 24px; 
@@ -220,6 +259,15 @@
         <div id="scoreboard-content"></div>
     </div>
     
+
+    <!-- Weapon HUD -->
+    <div id="weapon-hud"></div>
+    <div id="reload-bar-container">
+        <div id="reload-label">RELOADING</div>
+        <div id="reload-bar"><div id="reload-fill"></div></div>
+    </div>
+    <div id="scope-overlay"><canvas id="scope-canvas"></canvas></div>
+
     <!-- Controls -->
     <div id="fire-btn">FIRE</div>
     <div id="jump-btn">JUMP</div>
@@ -624,32 +672,325 @@
         setupJoystick('left-zone', 'move');
         setupJoystick('right-zone', 'look');
 
+
+        // ═══════════════════════════════════════════════════════════
+        // WEAPON SYSTEM
+        // ═══════════════════════════════════════════════════════════
+        const WEAPONS = {
+            knife: {
+                name: 'KNIFE',    key: '1', slot: 0,
+                damage: 50,       fireRate: 800,   automatic: false,
+                bulletSpeed: 2.0, spread: 0,       bulletsPerShot: 1,
+                ammo: Infinity,   maxAmmo: Infinity, reloadTime: 0,
+                color: 0xaaaaaa,  zoom: 1.0,
+                sound: () => playKnifeSwing()
+            },
+            pistol: {
+                name: 'PISTOL',   key: '2', slot: 1,
+                damage: 30,       fireRate: 400,   automatic: false,
+                bulletSpeed: 2.2, spread: 0.02,    bulletsPerShot: 1,
+                ammo: 12,         maxAmmo: 12,     reloadTime: 1200,
+                color: 0xffff00,  zoom: 1.0,
+                sound: () => playGunshot()
+            },
+            mac10: {
+                name: 'MAC-10',   key: '3', slot: 2,
+                damage: 22,       fireRate: 80,    automatic: true,
+                bulletSpeed: 2.0, spread: 0.06,    bulletsPerShot: 1,
+                ammo: 30,         maxAmmo: 30,     reloadTime: 1500,
+                color: 0xff8800,  zoom: 1.0,
+                sound: () => playGunshot()
+            },
+            m16: {
+                name: 'M16',      key: '4', slot: 3,
+                damage: 28,       fireRate: 100,   automatic: true,
+                bulletSpeed: 2.5, spread: 0.03,    bulletsPerShot: 1,
+                ammo: 30,         maxAmmo: 30,     reloadTime: 2000,
+                color: 0x44ff44,  zoom: 1.0,
+                sound: () => playGunshot()
+            },
+            shotgun: {
+                name: 'SHOTGUN',  key: '5', slot: 4,
+                damage: 18,       fireRate: 900,   automatic: false,
+                bulletSpeed: 1.8, spread: 0.12,    bulletsPerShot: 6,
+                ammo: 8,          maxAmmo: 8,      reloadTime: 2500,
+                color: 0xff4400,  zoom: 1.0,
+                sound: () => playShotgun()
+            },
+            sniper: {
+                name: 'AWP',      key: '6', slot: 5,
+                damage: 95,       fireRate: 1500,  automatic: false,
+                bulletSpeed: 4.0, spread: 0,       bulletsPerShot: 1,
+                ammo: 5,          maxAmmo: 5,      reloadTime: 3000,
+                color: 0x00ffff,  zoom: 4.0,
+                sound: () => playSniper()
+            }
+        };
+
+        let currentWeapon = 'pistol';
+        let weaponAmmo = {};
+        let lastFireTime = 0;
+        let isReloading = false;
+        let reloadTimeout = null;
+        let autoFireInterval = null;
+        let isScoped = false;
+        let isFiring = false;
+
+        // Init ammo
+        Object.keys(WEAPONS).forEach(k => { weaponAmmo[k] = WEAPONS[k].maxAmmo; });
+
+        function buildWeaponHUD() {
+            const hud = document.getElementById('weapon-hud');
+            hud.innerHTML = '';
+            Object.keys(WEAPONS).forEach(wKey => {
+                const w = WEAPONS[wKey];
+                const div = document.createElement('div');
+                div.className = 'weapon-slot' + (wKey === currentWeapon ? ' active' : '');
+                div.id = 'wslot-' + wKey;
+                const ammoTxt = w.ammo === Infinity ? '∞' : weaponAmmo[wKey] + '/' + w.maxAmmo;
+                div.innerHTML = `<span class="w-key">[${w.key}]</span> <span>${w.name}</span> <span class="w-ammo">${ammoTxt}</span>`;
+                div.addEventListener('click', () => switchWeapon(wKey));
+                hud.appendChild(div);
+            });
+        }
+
+        function updateWeaponHUD() {
+            Object.keys(WEAPONS).forEach(wKey => {
+                const slot = document.getElementById('wslot-' + wKey);
+                if (!slot) return;
+                const w = WEAPONS[wKey];
+                const ammoTxt = w.ammo === Infinity ? '∞' : weaponAmmo[wKey] + '/' + w.maxAmmo;
+                slot.className = 'weapon-slot' + (wKey === currentWeapon ? ' active' : '');
+                slot.querySelector('.w-ammo').textContent = ammoTxt;
+            });
+        }
+
+        function switchWeapon(wKey) {
+            if (isReloading) cancelReload();
+            if (isScoped) unscope();
+            currentWeapon = wKey;
+            updateWeaponHUD();
+            playWeaponSwitch();
+        }
+
+        function startReload() {
+            if (isReloading) return;
+            const w = WEAPONS[currentWeapon];
+            if (w.ammo === Infinity || weaponAmmo[currentWeapon] >= w.maxAmmo || w.reloadTime === 0) return;
+            isReloading = true;
+            playReload();
+            const bar = document.getElementById('reload-bar-container');
+            const fill = document.getElementById('reload-fill');
+            bar.classList.add('show');
+            fill.style.width = '0%';
+            const start = Date.now();
+            const interval = setInterval(() => {
+                const pct = Math.min(100, ((Date.now() - start) / w.reloadTime) * 100);
+                fill.style.width = pct + '%';
+                if (pct >= 100) clearInterval(interval);
+            }, 16);
+            reloadTimeout = setTimeout(() => {
+                weaponAmmo[currentWeapon] = w.maxAmmo;
+                isReloading = false;
+                bar.classList.remove('show');
+                updateWeaponHUD();
+            }, w.reloadTime);
+        }
+
+        function cancelReload() {
+            if (reloadTimeout) clearTimeout(reloadTimeout);
+            isReloading = false;
+            document.getElementById('reload-bar-container').classList.remove('show');
+        }
+
+        function drawScope() {
+            const canvas = document.getElementById('scope-canvas');
+            canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+            const ctx = canvas.getContext('2d');
+            const cx = canvas.width / 2, cy = canvas.height / 2;
+            const r = Math.min(cx, cy) * 0.42;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Dark vignette outside scope
+            ctx.fillStyle = 'rgba(0,0,0,0.92)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            // Clear circle
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+            ctx.globalCompositeOperation = 'source-over';
+            // Scope ring
+            ctx.strokeStyle = '#111'; ctx.lineWidth = 6;
+            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+            // Crosshair lines
+            ctx.strokeStyle = 'rgba(0,0,0,0.9)'; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r); ctx.stroke();
+            // Mil dots
+            [-r*0.5, -r*0.25, r*0.25, r*0.5].forEach(offset => {
+                ctx.fillStyle = 'rgba(0,0,0,0.8)';
+                ctx.beginPath(); ctx.arc(cx + offset, cy, 2.5, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(cx, cy + offset, 2.5, 0, Math.PI*2); ctx.fill();
+            });
+        }
+
+        function scope() {
+            isScoped = true;
+            camera.fov = CONFIG.CAMERA.FOV / WEAPONS[currentWeapon].zoom;
+            camera.updateProjectionMatrix();
+            document.getElementById('crosshair').style.display = 'none';
+            document.getElementById('scope-overlay').classList.add('show');
+            drawScope();
+        }
+
+        function unscope() {
+            isScoped = false;
+            camera.fov = CONFIG.CAMERA.FOV;
+            camera.updateProjectionMatrix();
+            document.getElementById('crosshair').style.display = '';
+            document.getElementById('scope-overlay').classList.remove('show');
+        }
+
+        // Extra sound functions for weapons
+        function playKnifeSwing() {
+            const ctx = getAudio();
+            const osc = ctx.createOscillator(); const gain = ctx.createGain();
+            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(600, ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.08);
+            gain.gain.setValueAtTime(0.2, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+            osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.08);
+        }
+        function playShotgun() {
+            const ctx = getAudio();
+            for (let i = 0; i < 3; i++) {
+                setTimeout(() => {
+                    const buf = ctx.createBuffer(1, ctx.sampleRate * 0.18, ctx.sampleRate);
+                    const data = buf.getChannelData(0);
+                    for (let j = 0; j < data.length; j++) data[j] = (Math.random()*2-1) * Math.pow(1 - j/data.length, 1.5);
+                    const src = ctx.createBufferSource(); src.buffer = buf;
+                    const gain = ctx.createGain(); gain.gain.setValueAtTime(0.8, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+                    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 600;
+                    src.connect(f); f.connect(gain); gain.connect(ctx.destination); src.start();
+                }, i * 18);
+            }
+        }
+        function playSniper() {
+            const ctx = getAudio();
+            const buf = ctx.createBuffer(1, ctx.sampleRate * 0.4, ctx.sampleRate);
+            const data = buf.getChannelData(0);
+            for (let i = 0; i < data.length; i++) data[i] = (Math.random()*2-1) * Math.pow(1 - i/data.length, 0.8) * (i < 100 ? i/100 : 1);
+            const src = ctx.createBufferSource(); src.buffer = buf;
+            const gain = ctx.createGain(); gain.gain.setValueAtTime(2.0, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+            const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 200; f.Q.value = 0.3;
+            src.connect(f); f.connect(gain); gain.connect(ctx.destination); src.start();
+        }
+        function playReload() {
+            const ctx = getAudio();
+            const osc = ctx.createOscillator(); const gain = ctx.createGain();
+            osc.type = 'square'; osc.frequency.setValueAtTime(220, ctx.currentTime); osc.frequency.setValueAtTime(180, ctx.currentTime + 0.05);
+            gain.gain.setValueAtTime(0.1, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+            osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.1);
+        }
+        function playWeaponSwitch() {
+            const ctx = getAudio();
+            const osc = ctx.createOscillator(); const gain = ctx.createGain();
+            osc.type = 'sine'; osc.frequency.setValueAtTime(400, ctx.currentTime); osc.frequency.exponentialRampToValueAtTime(600, ctx.currentTime + 0.06);
+            gain.gain.setValueAtTime(0.12, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
+            osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.06);
+        }
+        function playEmptyClick() {
+            const ctx = getAudio();
+            const osc = ctx.createOscillator(); const gain = ctx.createGain();
+            osc.type = 'square'; osc.frequency.value = 800;
+            gain.gain.setValueAtTime(0.08, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.04);
+            osc.connect(gain); gain.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.04);
+        }
+
+        buildWeaponHUD();
+
         // ═══════════════════════════════════════════════════════════
         // SHOOTING
         // ═══════════════════════════════════════════════════════════
         function fireBullet() {
-            if (!isAlive) return;
-            playGunshot();
-            
-            const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-            
-            socket.emit('fireBullet', { 
-                pos: camera.position.clone(),
-                dir: dir
-            });
+            if (!isAlive || isReloading) return;
+            const w = WEAPONS[currentWeapon];
+            const now = Date.now();
+            if (now - lastFireTime < w.fireRate) return;
+
+            // Check ammo
+            if (w.ammo !== Infinity && weaponAmmo[currentWeapon] <= 0) {
+                playEmptyClick();
+                startReload();
+                return;
+            }
+
+            lastFireTime = now;
+            if (w.ammo !== Infinity) weaponAmmo[currentWeapon]--;
+            updateWeaponHUD();
+            w.sound();
+
+            // Fire bullets (shotgun fires multiple)
+            for (let s = 0; s < w.bulletsPerShot; s++) {
+                const spread = w.spread;
+                const dir = new THREE.Vector3(
+                    (Math.random() - 0.5) * spread,
+                    (Math.random() - 0.5) * spread,
+                    -1
+                ).normalize().applyQuaternion(camera.quaternion);
+
+                socket.emit('fireBullet', {
+                    pos: camera.position.clone(),
+                    dir: dir,
+                    weapon: currentWeapon,
+                    speed: w.bulletSpeed,
+                    damage: w.damage
+                });
+            }
+
+            // Auto reload when empty
+            if (w.ammo !== Infinity && weaponAmmo[currentWeapon] <= 0) {
+                setTimeout(startReload, 200);
+            }
+        }
+
+        function startAutoFire() {
+            if (autoFireInterval) return;
+            fireBullet();
+            autoFireInterval = setInterval(() => {
+                if (isFiring && WEAPONS[currentWeapon].automatic) fireBullet();
+                else stopAutoFire();
+            }, WEAPONS[currentWeapon].fireRate);
+        }
+
+        function stopAutoFire() {
+            if (autoFireInterval) { clearInterval(autoFireInterval); autoFireInterval = null; }
+        }
+
+        function onFireStart() {
+            isFiring = true;
+            if (WEAPONS[currentWeapon].automatic) startAutoFire();
+            else fireBullet();
+        }
+
+        function onFireEnd() {
+            isFiring = false;
+            stopAutoFire();
         }
 
         // ═══════════════════════════════════════════════════════════
         // DESKTOP CONTROLS
         // ═══════════════════════════════════════════════════════════
         const keys = {};
-        document.addEventListener('keydown', e => { 
+        document.addEventListener('keydown', e => {
             keys[e.code] = true;
-            
-            // Show scoreboard on TAB
-            if (e.code === 'Tab') {
-                e.preventDefault();
-                document.getElementById('scoreboard').classList.add('show');
+            if (e.code === 'Tab') { e.preventDefault(); document.getElementById('scoreboard').classList.add('show'); }
+            if (e.code === 'Digit1') switchWeapon('knife');
+            if (e.code === 'Digit2') switchWeapon('pistol');
+            if (e.code === 'Digit3') switchWeapon('mac10');
+            if (e.code === 'Digit4') switchWeapon('m16');
+            if (e.code === 'Digit5') switchWeapon('shotgun');
+            if (e.code === 'Digit6') switchWeapon('sniper');
+            if (e.code === 'KeyR') startReload();
+            if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+                if (WEAPONS[currentWeapon].zoom > 1) { if (isScoped) unscope(); else scope(); }
             }
         });
         document.addEventListener('keyup', e => { 
@@ -661,10 +1002,12 @@
             }
         });
 
-        document.addEventListener('click', () => {
-            if (document.pointerLockElement) fireBullet();
+        document.addEventListener('mousedown', e => {
+            if (e.button !== 0) return;
+            if (document.pointerLockElement) onFireStart();
             else document.body.requestPointerLock();
         });
+        document.addEventListener('mouseup', e => { if (e.button === 0) onFireEnd(); });
 
         document.addEventListener('mousemove', e => {
             if (document.pointerLockElement) {
@@ -681,9 +1024,10 @@
         // MOBILE BUTTONS
         // ═══════════════════════════════════════════════════════════
         document.getElementById('fire-btn').addEventListener('touchstart', e => {
-            e.preventDefault();
-            e.stopPropagation();
-            fireBullet();
+            e.preventDefault(); e.stopPropagation(); onFireStart();
+        });
+        document.getElementById('fire-btn').addEventListener('touchend', e => {
+            e.preventDefault(); onFireEnd();
         });
 
         document.getElementById('jump-btn').addEventListener('touchstart', e => {

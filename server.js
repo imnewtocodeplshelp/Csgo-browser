@@ -131,15 +131,27 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // Create bullet on server
+        // Create bullet on server - use weapon-specific stats
+        const weaponDamage = {
+            knife: 50, pistol: 30, mac10: 22, m16: 28, shotgun: 18, sniper: 95
+        };
+        const weaponSpeed = {
+            knife: 2.0, pistol: 2.2, mac10: 2.0, m16: 2.5, shotgun: 1.8, sniper: 4.0
+        };
+        const wName = data.weapon || 'pistol';
+        const bSpeed = weaponSpeed[wName] || BULLET_SPEED;
+        const bDamage = weaponDamage[wName] || BULLET_DAMAGE;
+
         const bullet = {
             id: bulletIdCounter++,
             ownerId: socket.id,
+            weapon: wName,
+            damage: bDamage,
             pos: { ...data.pos },
             vel: {
-                x: data.dir.x * BULLET_SPEED,
-                y: data.dir.y * BULLET_SPEED,
-                z: data.dir.z * BULLET_SPEED
+                x: data.dir.x * bSpeed,
+                y: data.dir.y * bSpeed,
+                z: data.dir.z * bSpeed
             },
             life: BULLET_LIFETIME
         };
@@ -262,9 +274,9 @@ setInterval(() => {
             // Check if bullet hits this player
             if (checkBulletHit(bullet, playerId, player)) {
                 // Apply damage
-                player.health -= BULLET_DAMAGE;
+                player.health -= bullet.damage || BULLET_DAMAGE;
                 
-                console.log(`🎯 Server detected: Bullet #${bullet.id} hit ${playerId} (${player.health} HP)`);
+                console.log(`🎯 Server detected: Bullet #${bullet.id} [${bullet.weapon||"pistol"}] hit ${playerId} (${player.health} HP)`);
                 
                 // Broadcast health update
                 io.emit('healthUpdate', {
