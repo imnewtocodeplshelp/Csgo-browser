@@ -54,9 +54,15 @@ function distance(p1, p2) {
 
 // Check if bullet hits player
 function checkBulletHit(bullet, playerId, playerPos) {
-    const hitRadius = 0.6; // Player collision radius
-    const dist = distance(bullet.pos, playerPos);
-    return dist < hitRadius;
+    const hitRadius = 0.8;
+    // playerPos is camera/eye level (top of head)
+    // Check head, chest and waist for accurate hit detection
+    const points = [
+        { x: playerPos.x, y: playerPos.y - 0.3, z: playerPos.z },
+        { x: playerPos.x, y: playerPos.y - 0.9, z: playerPos.z },
+        { x: playerPos.x, y: playerPos.y - 1.4, z: playerPos.z },
+    ];
+    return points.some(p => distance(bullet.pos, p) < hitRadius);
 }
 
 io.on('connection', (socket) => {
