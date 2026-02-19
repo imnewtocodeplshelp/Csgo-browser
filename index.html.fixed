@@ -107,7 +107,26 @@
         
 
         /* ── WEAPON HUD ── */
-        #weapon-hud { display: none; }
+        #weapon-hud {
+            position: absolute; bottom: 80px; right: 20px;
+            z-index: 20; pointer-events: none; text-align: right;
+        }
+        .weapon-slot {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 7px 14px; margin: 3px 0; border-radius: 8px;
+            font-family: monospace; font-size: 13px; color: #777;
+            background: rgba(0,0,0,0.4); border: 1px solid #222;
+            transition: all 0.15s; cursor: pointer; pointer-events: all;
+        }
+        .weapon-slot.active {
+            color: #0f0; border-color: #0f0;
+            background: rgba(0,255,0,0.12);
+            box-shadow: 0 0 10px rgba(0,255,0,0.2);
+        }
+        .weapon-slot .w-key { color: #555; font-size: 11px; }
+        .weapon-slot.active .w-key { color: #0a0; }
+        .weapon-slot .w-ammo { font-size: 11px; }
+        .weapon-slot.active .w-ammo { color: #ff0; }
         #reload-bar-container {
             position: absolute; bottom: 68px; left: 50%;
             transform: translateX(-50%); width: 200px;
@@ -222,47 +241,6 @@
         .tc-desc { font-size: 12px; color: #aaa; line-height: 1.7; }
         .team-wait { margin-top: 30px; font-size: 14px; color: #888; letter-spacing: 2px; min-height: 20px; }
 
-        /* ── WEAPON SELECT ── */
-        #weapon-select {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0a0a0a 100%);
-            display: none; flex-direction: column;
-            align-items: center; justify-content: center;
-            z-index: 890; color: #fff; font-family: monospace;
-        }
-        #weapon-select.show { display: flex; }
-        #weapon-select h1 {
-            font-size: 36px; margin: 0 0 6px 0; letter-spacing: 6px;
-            color: #ff8c00; text-shadow: 0 0 30px rgba(255,140,0,0.6);
-        }
-        #weapon-select .sub {
-            font-size: 13px; letter-spacing: 4px; color: #888; margin: 0 0 36px 0;
-        }
-        .weapon-grid {
-            display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
-            max-width: 760px; width: 90%;
-        }
-        .wsel-card {
-            padding: 18px 16px; border-radius: 10px; cursor: pointer;
-            border: 2px solid #333; background: rgba(255,255,255,0.04);
-            transition: all 0.15s; text-align: center; position: relative;
-        }
-        .wsel-card:hover { transform: translateY(-4px); border-color: #ff8c00; background: rgba(255,140,0,0.1); box-shadow: 0 0 20px rgba(255,140,0,0.3); }
-        .wsel-card.selected { border-color: #0f0; background: rgba(0,255,0,0.1); box-shadow: 0 0 20px rgba(0,255,0,0.3); }
-        .wsel-card.selected::after { content: '✓'; position: absolute; top: 8px; right: 10px; color: #0f0; font-size: 14px; font-weight: bold; }
-        .wsel-icon { font-size: 36px; margin-bottom: 8px; }
-        .wsel-name { font-size: 15px; font-weight: bold; letter-spacing: 2px; color: #fff; margin-bottom: 6px; }
-        .wsel-stats { font-size: 10px; color: #777; line-height: 1.8; }
-        .wsel-stats span { color: #aaa; }
-        .wsel-confirm {
-            margin-top: 28px; padding: 14px 50px; font-size: 16px; letter-spacing: 4px;
-            background: #ff8c00; color: #000; border: none; border-radius: 8px;
-            cursor: pointer; font-family: monospace; font-weight: bold;
-            transition: all 0.15s; display: none;
-        }
-        .wsel-confirm.show { display: block; }
-        .wsel-confirm:hover { background: #ffaa33; transform: scale(1.04); }
-
         /* Scoreboard */
         #scoreboard {
             position: absolute; top: 50%; left: 50%;
@@ -302,15 +280,7 @@
         <div class="team-wait" id="team-wait-msg"></div>
     </div>
 
-    <!-- Weapon Select -->
-    <div id="weapon-select">
-        <h1>LOADOUT</h1>
-        <p class="sub">CHOOSE YOUR PRIMARY WEAPON</p>
-        <div class="weapon-grid" id="weapon-grid"></div>
-        <button class="wsel-confirm" id="wsel-confirm-btn" onclick="window.confirmWeapon()">DEPLOY →</button>
-    </div>
-
-    <div id="loading" style="display:none">
+    <div id="loading">
         <div class="spinner"></div>
         <div>Loading Game...</div>
     </div>
@@ -509,69 +479,15 @@
         document.body.appendChild(renderer.domElement);
         window._dbg.camera = camera;
 
-        // ── TEAM SELECT & WEAPON SELECT ──────────────────────────
+        // ── TEAM SELECT ──────────────────────────────────────────
         let myTeam = null;
-        let selectedWeapon = null;
-
-        const WEAPON_META = {
-            knife:   { icon: '🔪', desc: 'DMG: 50 | Melee\nInfinite uses\nRate: Slow' },
-            pistol:  { icon: '🔫', desc: 'DMG: 30 | Ammo: 12\nAccurate\nRate: Medium' },
-            mac10:   { icon: '🔫', desc: 'DMG: 22 | Ammo: 30\nFull Auto\nRate: Fast' },
-            m16:     { icon: '🪖', desc: 'DMG: 28 | Ammo: 30\nFull Auto\nRate: Fast' },
-            shotgun: { icon: '💥', desc: 'DMG: 18x6 | Ammo: 8\n6 pellets/shot\nRate: Slow' },
-            sniper:  { icon: '🎯', desc: 'DMG: 95 | Ammo: 5\n4x Scope\nRate: Very Slow' }
-        };
-
-        function buildWeaponSelectScreen() {
-            const grid = document.getElementById('weapon-grid');
-            grid.innerHTML = '';
-            Object.keys(WEAPONS).forEach(wKey => {
-                const w = WEAPONS[wKey];
-                const meta = WEAPON_META[wKey];
-                const card = document.createElement('div');
-                card.className = 'wsel-card';
-                card.id = 'wcard-' + wKey;
-                card.innerHTML = `
-                    <div class="wsel-icon">${meta.icon}</div>
-                    <div class="wsel-name">${w.name}</div>
-                    <div class="wsel-stats">${meta.desc.split('\n').map(l => `<span>${l}</span>`).join('<br>')}</div>
-                `;
-                card.onclick = () => selectWeaponCard(wKey);
-                grid.appendChild(card);
-            });
-        }
-
-        function selectWeaponCard(wKey) {
-            // Deselect all
-            document.querySelectorAll('.wsel-card').forEach(c => c.classList.remove('selected'));
-            // Select chosen
-            document.getElementById('wcard-' + wKey).classList.add('selected');
-            selectedWeapon = wKey;
-            document.getElementById('wsel-confirm-btn').classList.add('show');
-        }
 
         window.joinTeam = function(team) {
             myTeam = team;
             document.getElementById('team-select').classList.add('hidden');
+            document.getElementById('team-wait-msg').textContent = '';
             socket.emit('joinTeam', { team });
-            // Show weapon select
-            buildWeaponSelectScreen();
-            document.getElementById('weapon-select').classList.add('show');
-        };
-
-        window.confirmWeapon = function() {
-            if (!selectedWeapon) return;
-            currentWeapon = selectedWeapon;
-            // Reset ammo for selected weapon
-            Object.keys(WEAPONS).forEach(k => { weaponAmmo[k] = WEAPONS[k].maxAmmo; });
-            updateWeaponHUD();
-            document.getElementById('weapon-select').classList.remove('show');
-            // Show loading / start game
-            document.getElementById('loading').style.display = 'flex';
-            loadMap().then(() => {
-                buildWeaponHUD();
-                animate();
-            });
+            console.log('Joined team:', team);
         };
 
         // Lighting
@@ -900,6 +816,7 @@
                 div.id = 'wslot-' + wKey;
                 const ammoTxt = w.ammo === Infinity ? '∞' : weaponAmmo[wKey] + '/' + w.maxAmmo;
                 div.innerHTML = `<span class="w-key">[${w.key}]</span> <span>${w.name}</span> <span class="w-ammo">${ammoTxt}</span>`;
+                div.addEventListener('click', () => switchWeapon(wKey));
                 hud.appendChild(div);
             });
         }
@@ -1132,7 +1049,12 @@
         document.addEventListener('keydown', e => {
             keys[e.code] = true;
             if (e.code === 'Tab') { e.preventDefault(); document.getElementById('scoreboard').classList.add('show'); }
-
+            if (e.code === 'Digit1') switchWeapon('knife');
+            if (e.code === 'Digit2') switchWeapon('pistol');
+            if (e.code === 'Digit3') switchWeapon('mac10');
+            if (e.code === 'Digit4') switchWeapon('m16');
+            if (e.code === 'Digit5') switchWeapon('shotgun');
+            if (e.code === 'Digit6') switchWeapon('sniper');
             if (e.code === 'KeyR') startReload();
             if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
                 if (WEAPONS[currentWeapon].zoom > 1) { if (isScoped) unscope(); else scope(); }
@@ -1149,11 +1071,6 @@
 
         document.addEventListener('mousedown', e => {
             if (e.button !== 0) return;
-            // Don't fire or lock pointer if clicking on any overlay UI
-            const weaponSelect = document.getElementById('weapon-select');
-            const teamSelect = document.getElementById('team-select');
-            if (weaponSelect && weaponSelect.classList.contains('show')) return;
-            if (teamSelect && !teamSelect.classList.contains('hidden')) return;
             if (document.pointerLockElement) onFireStart();
             else document.body.requestPointerLock();
         });
@@ -1478,8 +1395,11 @@
         // ═══════════════════════════════════════════════════════════
         // START GAME
         // ═══════════════════════════════════════════════════════════
-        // Game starts after weapon selection (via confirmWeapon)
-        // loadMap and animate are called from window.confirmWeapon
+        console.log('🎮 Starting game...');
+        loadMap().then(() => {
+            console.log('🎮 Game started!');
+            animate();
+        });
 
         // ═══════════════════════════════════════════════════════════
         // WINDOW RESIZE
