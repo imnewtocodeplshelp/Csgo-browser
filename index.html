@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Dust2 FPS Multiplayer - Health System</title>
+    <title>CS:BEAN - Browser FPS</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
         body { margin: 0; overflow: hidden; background: #000; touch-action: none; font-family: monospace; user-select: none; }
@@ -11,14 +11,16 @@
         /* Loading screen */
         #loading {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: #000; display: flex; flex-direction: column;
+            background: #1a0a2e; display: flex; flex-direction: column;
             align-items: center; justify-content: center;
-            color: #0f0; font-size: 24px; z-index: 1000; transition: opacity 0.5s;
+            color: #a8ff78; font-size: 24px; z-index: 1000; transition: opacity 0.5s;
         }
         #loading.hidden { opacity: 0; pointer-events: none; }
+        #loading .bean-logo { font-size: 72px; animation: beanBounce 0.8s ease-in-out infinite alternate; margin-bottom: 16px; }
+        @keyframes beanBounce { from { transform: translateY(0) rotate(-10deg); } to { transform: translateY(-16px) rotate(10deg); } }
         .spinner {
-            border: 4px solid rgba(0, 255, 0, 0.1);
-            border-top: 4px solid #0f0; border-radius: 50%;
+            border: 4px solid rgba(168, 255, 120, 0.15);
+            border-top: 4px solid #a8ff78; border-radius: 50%;
             width: 60px; height: 60px; animation: spin 1s linear infinite;
             margin-bottom: 20px;
         }
@@ -29,31 +31,34 @@
         
         /* UI */
         #ui { 
-            position: absolute; top: 10px; left: 10px; color: #0f0; 
+            position: absolute; top: 10px; left: 10px; color: #a8ff78; 
             pointer-events: none; text-shadow: 2px 2px #000; font-size: 14px; z-index: 10;
             line-height: 1.5;
         }
         
-        /* Health bar */
         #health-container {
             position: absolute; bottom: 30px; left: 50%;
             transform: translateX(-50%); z-index: 10;
-            pointer-events: none;
+            pointer-events: none; text-align: center;
+        }
+        #health-label {
+            font-size: 11px; letter-spacing: 3px; color: #a8ff78; margin-bottom: 4px; text-shadow: 0 0 8px #a8ff78;
         }
         #health-bar {
-            width: 300px; height: 30px;
+            width: 300px; height: 26px;
             background: rgba(0, 0, 0, 0.7);
-            border: 3px solid rgba(255, 255, 255, 0.5);
-            border-radius: 5px; overflow: hidden;
+            border: 3px solid rgba(168, 255, 120, 0.4);
+            border-radius: 20px; overflow: hidden;
+            box-shadow: 0 0 12px rgba(168,255,120,0.2);
         }
         #health-fill {
-            height: 100%; background: linear-gradient(to right, #ff0000, #00ff00);
-            transition: width 0.3s; width: 100%;
+            height: 100%; background: linear-gradient(to right, #a8ff78, #78ffa8);
+            transition: width 0.3s; width: 100%; border-radius: 20px;
         }
         #health-text {
             position: absolute; top: 50%; left: 50%;
             transform: translate(-50%, -50%);
-            color: white; font-size: 18px; font-weight: bold;
+            color: white; font-size: 14px; font-weight: bold;
             text-shadow: 2px 2px 4px #000;
         }
         
@@ -64,10 +69,11 @@
             text-align: right;
         }
         .kill-message {
-            color: #fff; font-size: 14px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 5px 10px; margin-bottom: 5px;
-            border-radius: 5px;
+            color: #fff; font-size: 13px;
+            background: linear-gradient(135deg, rgba(168,255,120,0.15), rgba(0,0,0,0.8));
+            border-left: 3px solid #a8ff78;
+            padding: 5px 12px; margin-bottom: 5px;
+            border-radius: 0 8px 8px 0;
             animation: fadeIn 0.3s, fadeOut 0.5s 4.5s;
         }
         @keyframes fadeIn {
@@ -78,21 +84,22 @@
             to { opacity: 0; }
         }
         
-        /* Death screen */
         #death-screen {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(139, 0, 0, 0.7);
+            background: radial-gradient(ellipse at center, rgba(80,0,0,0.85), rgba(0,0,0,0.95));
             display: none; flex-direction: column;
             align-items: center; justify-content: center;
             z-index: 500; animation: fadeIn 0.5s;
         }
         #death-screen.show { display: flex; }
+        #death-screen .bean-dead { font-size: 96px; animation: deadBean 1s ease-in-out infinite alternate; }
+        @keyframes deadBean { from { transform: rotate(-15deg) scale(0.9); } to { transform: rotate(15deg) scale(1.1); } }
         #death-screen h1 {
-            color: #fff; font-size: 72px; margin: 0;
-            text-shadow: 4px 4px 8px #000;
+            color: #ff6b6b; font-size: 64px; margin: 10px 0 0 0;
+            text-shadow: 4px 4px 8px #000; letter-spacing: 6px;
         }
         #death-screen p {
-            color: #fff; font-size: 24px;
+            color: #fff; font-size: 20px;
             text-shadow: 2px 2px 4px #000;
         }
         
@@ -125,18 +132,17 @@
         #scope-overlay.show { display: block; }
         #scope-overlay canvas { width: 100%; height: 100%; }
 
-        /* Crosshair */
         #crosshair { 
             position: absolute; top: 50%; left: 50%; width: 24px; height: 24px; 
             transform: translate(-50%, -50%); pointer-events: none; z-index: 8;
         }
         #crosshair::before, #crosshair::after { 
-            content: ''; position: absolute; background: #0f8; box-shadow: 0 0 5px #0f8;
+            content: ''; position: absolute; background: #a8ff78; box-shadow: 0 0 5px #a8ff78;
         }
         #crosshair::before { top: 50%; left: -10px; width: 44px; height: 2px; }
         #crosshair::after { left: 50%; top: -10px; width: 2px; height: 44px; }
         #crosshair.hit::before, #crosshair.hit::after {
-            background: #f00; box-shadow: 0 0 10px #f00;
+            background: #ff6b6b; box-shadow: 0 0 10px #ff6b6b;
         }
 
         /* Touch zones - full half-screen each */
@@ -187,45 +193,47 @@
             touch-action: manipulation;
         }
         
-        /* ── TEAM SELECT ── */
         #team-select {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0a0a0a 100%);
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 40%, #0a1a0a 100%);
             display: flex; flex-direction: column;
             align-items: center; justify-content: center;
             z-index: 900; color: #fff; font-family: monospace;
         }
         #team-select.hidden { display: none; }
+        #team-select .main-bean { font-size: 80px; margin-bottom: 10px; animation: beanBounce 1s ease-in-out infinite alternate; }
         #team-select h1 {
-            font-size: 48px; margin: 0 0 8px 0; letter-spacing: 8px;
-            color: #ff8c00; text-shadow: 0 0 30px rgba(255,140,0,0.6);
+            font-size: 52px; margin: 0 0 8px 0; letter-spacing: 8px;
+            background: linear-gradient(to right, #a8ff78, #78ffa8);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 20px rgba(168,255,120,0.5));
         }
         #team-select .sub {
-            font-size: 16px; letter-spacing: 4px; color: #888; margin: 0 0 50px 0;
+            font-size: 14px; letter-spacing: 4px; color: #666; margin: 0 0 50px 0;
         }
         .team-cards { display: flex; gap: 40px; }
         .team-card {
-            width: 200px; padding: 30px 20px; border-radius: 12px;
+            width: 210px; padding: 30px 20px; border-radius: 16px;
             text-align: center; cursor: pointer;
             border: 2px solid transparent;
-            transition: all 0.2s; background: rgba(255,255,255,0.05);
+            transition: all 0.2s; background: rgba(255,255,255,0.04);
         }
-        .team-card:hover { transform: translateY(-6px); }
-        .team-card.ct { border-color: #4488ff; }
-        .team-card.ct:hover { background: rgba(68,136,255,0.15); box-shadow: 0 0 30px rgba(68,136,255,0.4); }
-        .team-card.t  { border-color: #ff4444; }
-        .team-card.t:hover  { background: rgba(255,68,68,0.15);  box-shadow: 0 0 30px rgba(255,68,68,0.4); }
-        .tc-icon { font-size: 56px; margin-bottom: 12px; }
-        .tc-name { font-size: 28px; font-weight: bold; letter-spacing: 3px; margin-bottom: 10px; }
-        .team-card.ct .tc-name { color: #4488ff; }
-        .team-card.t  .tc-name { color: #ff4444; }
-        .tc-desc { font-size: 12px; color: #aaa; line-height: 1.7; }
-        .team-wait { margin-top: 30px; font-size: 14px; color: #888; letter-spacing: 2px; min-height: 20px; }
+        .team-card:hover { transform: translateY(-8px) scale(1.03); }
+        .team-card.ct { border-color: #78b4ff; }
+        .team-card.ct:hover { background: rgba(120,180,255,0.12); box-shadow: 0 0 40px rgba(120,180,255,0.35); }
+        .team-card.t  { border-color: #ff7878; }
+        .team-card.t:hover  { background: rgba(255,120,120,0.12);  box-shadow: 0 0 40px rgba(255,120,120,0.35); }
+        .tc-icon { font-size: 62px; margin-bottom: 12px; }
+        .tc-name { font-size: 26px; font-weight: bold; letter-spacing: 3px; margin-bottom: 10px; }
+        .team-card.ct .tc-name { color: #78b4ff; }
+        .team-card.t  .tc-name { color: #ff7878; }
+        .tc-desc { font-size: 12px; color: #aaa; line-height: 1.8; }
+        .team-wait { margin-top: 30px; font-size: 14px; color: #666; letter-spacing: 2px; min-height: 20px; }
 
         /* ── WEAPON SELECT ── */
         #weapon-select {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0a0a0a 100%);
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 40%, #0a1a0a 100%);
             display: none; flex-direction: column;
             align-items: center; justify-content: center;
             z-index: 890; color: #fff; font-family: monospace;
@@ -233,35 +241,36 @@
         #weapon-select.show { display: flex; }
         #weapon-select h1 {
             font-size: 36px; margin: 0 0 6px 0; letter-spacing: 6px;
-            color: #ff8c00; text-shadow: 0 0 30px rgba(255,140,0,0.6);
+            background: linear-gradient(to right, #a8ff78, #78ffa8);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
         }
         #weapon-select .sub {
-            font-size: 13px; letter-spacing: 4px; color: #888; margin: 0 0 36px 0;
+            font-size: 13px; letter-spacing: 4px; color: #666; margin: 0 0 36px 0;
         }
         .weapon-grid {
             display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
             max-width: 760px; width: 90%;
         }
         .wsel-card {
-            padding: 18px 16px; border-radius: 10px; cursor: pointer;
-            border: 2px solid #333; background: rgba(255,255,255,0.04);
+            padding: 18px 16px; border-radius: 12px; cursor: pointer;
+            border: 2px solid #2a2a3a; background: rgba(255,255,255,0.03);
             transition: all 0.15s; text-align: center; position: relative;
         }
-        .wsel-card:hover { transform: translateY(-4px); border-color: #ff8c00; background: rgba(255,140,0,0.1); box-shadow: 0 0 20px rgba(255,140,0,0.3); }
-        .wsel-card.selected { border-color: #0f0; background: rgba(0,255,0,0.1); box-shadow: 0 0 20px rgba(0,255,0,0.3); }
-        .wsel-card.selected::after { content: '✓'; position: absolute; top: 8px; right: 10px; color: #0f0; font-size: 14px; font-weight: bold; }
+        .wsel-card:hover { transform: translateY(-4px); border-color: #a8ff78; background: rgba(168,255,120,0.08); box-shadow: 0 0 20px rgba(168,255,120,0.2); }
+        .wsel-card.selected { border-color: #78ffa8; background: rgba(120,255,168,0.12); box-shadow: 0 0 24px rgba(120,255,168,0.3); }
+        .wsel-card.selected::after { content: '✓'; position: absolute; top: 8px; right: 10px; color: #78ffa8; font-size: 14px; font-weight: bold; }
         .wsel-icon { font-size: 36px; margin-bottom: 8px; }
         .wsel-name { font-size: 15px; font-weight: bold; letter-spacing: 2px; color: #fff; margin-bottom: 6px; }
-        .wsel-stats { font-size: 10px; color: #777; line-height: 1.8; }
-        .wsel-stats span { color: #aaa; }
+        .wsel-stats { font-size: 10px; color: #666; line-height: 1.8; }
+        .wsel-stats span { color: #999; }
         .wsel-confirm {
             margin-top: 28px; padding: 14px 50px; font-size: 16px; letter-spacing: 4px;
-            background: #ff8c00; color: #000; border: none; border-radius: 8px;
+            background: linear-gradient(135deg, #a8ff78, #78ffa8); color: #0a1a0a; border: none; border-radius: 10px;
             cursor: pointer; font-family: monospace; font-weight: bold;
             transition: all 0.15s; display: none;
         }
         .wsel-confirm.show { display: block; }
-        .wsel-confirm:hover { background: #ffaa33; transform: scale(1.04); }
+        .wsel-confirm:hover { transform: scale(1.05); box-shadow: 0 0 20px rgba(168,255,120,0.5); }
 
         /* Scoreboard */
         #scoreboard {
@@ -285,18 +294,19 @@
 <body>
     <!-- Team Select -->
     <div id="team-select">
-        <h1>CS:GO BROWSER</h1>
-        <p class="sub">SELECT YOUR TEAM</p>
+        <div class="main-bean">🫘</div>
+        <h1>CS:BEAN</h1>
+        <p class="sub">CHOOSE YOUR BEAN SQUAD</p>
         <div class="team-cards">
             <div class="team-card ct" onclick="window.joinTeam('ct')">
-                <div class="tc-icon">🛡️</div>
-                <div class="tc-name">CT</div>
-                <div class="tc-desc">Counter-Terrorists<br>Eliminate all T-side<br>or survive the round</div>
+                <div class="tc-icon">🫘👮</div>
+                <div class="tc-name">POLICE BEANS</div>
+                <div class="tc-desc">Blue cap + gold badge<br>Protect the map<br>Bean the terrorists</div>
             </div>
             <div class="team-card t" onclick="window.joinTeam('t')">
-                <div class="tc-icon">💣</div>
-                <div class="tc-name">T</div>
-                <div class="tc-desc">Terrorists<br>Eliminate all CT-side<br>or survive the round</div>
+                <div class="tc-icon">🫘🪖</div>
+                <div class="tc-name">BANDANA BEANS</div>
+                <div class="tc-desc">Red bandana gang<br>Spread the chaos<br>Bean the cops</div>
             </div>
         </div>
         <div class="team-wait" id="team-wait-msg"></div>
@@ -304,15 +314,16 @@
 
     <!-- Weapon Select -->
     <div id="weapon-select">
-        <h1>LOADOUT</h1>
-        <p class="sub">CHOOSE YOUR PRIMARY WEAPON</p>
+        <h1>BEAN LOADOUT</h1>
+        <p class="sub">CHOOSE YOUR WEAPON, BEAN</p>
         <div class="weapon-grid" id="weapon-grid"></div>
-        <button class="wsel-confirm" id="wsel-confirm-btn" onclick="window.confirmWeapon()">DEPLOY →</button>
+        <button class="wsel-confirm" id="wsel-confirm-btn" onclick="window.confirmWeapon()">DEPLOY BEAN →</button>
     </div>
 
     <div id="loading" style="display:none">
+        <div class="bean-logo">🫘</div>
         <div class="spinner"></div>
-        <div>Loading Game...</div>
+        <div>Loading Beans...</div>
     </div>
     
     <div id="ui">Loading...</div>
@@ -321,6 +332,7 @@
     
     <!-- Health bar -->
     <div id="health-container">
+        <div id="health-label">🫘 BEAN HP</div>
         <div id="health-bar">
             <div id="health-fill"></div>
         </div>
@@ -332,14 +344,15 @@
     
     <!-- Death screen -->
     <div id="death-screen">
-        <h1>YOU DIED</h1>
-        <p id="death-message">Killed by Player</p>
+        <div class="bean-dead">🫘</div>
+        <h1>YOU GOT BEANED</h1>
+        <p id="death-message">Beaned by Player</p>
         <p>Respawning in <span id="respawn-timer">3</span> seconds...</p>
     </div>
     
     <!-- Scoreboard (press TAB) -->
     <div id="scoreboard">
-        <h2>📊 SCOREBOARD</h2>
+        <h2>🫘 BEAN SCOREBOARD</h2>
         <div id="scoreboard-content"></div>
     </div>
     
@@ -385,8 +398,8 @@
             BULLET: {
                 SPEED: 1.5,
                 RADIUS: 0.08,
-                COLOR: 0xffff00,
-                COLOR_OTHER: 0xff4444
+                COLOR: 0xa8ff78,
+                COLOR_OTHER: 0xff7878
             },
             CAMERA: {
                 FOV: 75,
@@ -493,8 +506,8 @@
         
         // Scene & Camera
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x87CEEB);
-        scene.fog = new THREE.Fog(0x87CEEB, 50, 300);
+        scene.background = new THREE.Color(0x7ec8e3);
+        scene.fog = new THREE.Fog(0x7ec8e3, 60, 320);
 
         const camera = new THREE.PerspectiveCamera(
             CONFIG.CAMERA.FOV, 
@@ -599,6 +612,10 @@
         // Network throttling
         let lastEmit = 0;
 
+        // Track player teams
+        const playerTeams = {};
+
+
         // Debug stats
         const stats = {
             fps: 0,
@@ -619,11 +636,11 @@
             
             // Change color based on health
             if (myHealth > 66) {
-                healthFill.style.background = 'linear-gradient(to right, #44ff44, #00ff00)';
+                healthFill.style.background = 'linear-gradient(to right, #78ffa8, #a8ff78)';
             } else if (myHealth > 33) {
-                healthFill.style.background = 'linear-gradient(to right, #ffaa00, #ffff00)';
+                healthFill.style.background = 'linear-gradient(to right, #ffd978, #ffec78)';
             } else {
-                healthFill.style.background = 'linear-gradient(to right, #ff0000, #ff4444)';
+                healthFill.style.background = 'linear-gradient(to right, #ff6b6b, #ff9478)';
             }
         }
 
@@ -652,7 +669,7 @@
         function showDeathScreen(killerName) {
             const deathScreen = document.getElementById('death-screen');
             const deathMessage = document.getElementById('death-message');
-            deathMessage.textContent = `Killed by ${killerName}`;
+            deathMessage.textContent = `Beaned by ${killerName}`;
             deathScreen.classList.add('show');
             
             // Countdown timer
@@ -1313,7 +1330,9 @@
             // Create other players
             Object.keys(data.players).forEach(id => {
                 if (id !== myId && !otherPlayers[id]) {
-                    otherPlayers[id] = createPlayerModel();
+                    const team = data.players[id].team || null;
+                    playerTeams[id] = team;
+                    otherPlayers[id] = createPlayerModel(team);
                     playerStats[id] = data.players[id];
                 }
             });
@@ -1327,11 +1346,22 @@
         });
 
         socket.on('newPlayer', d => {
-            console.log('New player:', d.id);
+            console.log('New player:', d.id, 'team:', d.team);
             if (d.id !== myId && !otherPlayers[d.id]) {
-                otherPlayers[d.id] = createPlayerModel();
+                const team = d.team || null;
+                playerTeams[d.id] = team;
+                otherPlayers[d.id] = createPlayerModel(team);
                 playerStats[d.id] = { kills: d.kills || 0, deaths: d.deaths || 0 };
             }
+        });
+
+        socket.on('playerTeamUpdate', d => {
+            playerTeams[d.id] = d.team;
+            // Rebuild the model with correct team accessories
+            if (otherPlayers[d.id]) {
+                scene.remove(otherPlayers[d.id]);
+            }
+            otherPlayers[d.id] = createPlayerModel(d.team);
         });
 
         socket.on('playerMoved', d => {
@@ -1390,7 +1420,7 @@
             if (data.killerId === myId && data.id !== myId) playKill();
             const killer = data.killerId.substring(0, 8);
             const victim = data.id === myId ? 'You' : data.id.substring(0, 8);
-            addKillFeedMessage(`${killer} eliminated ${victim}`);
+            addKillFeedMessage(`🫘 ${killer} beaned ${victim}`);
             
             // Update stats
             if (playerStats[data.killerId]) {
@@ -1431,34 +1461,136 @@
         // ═══════════════════════════════════════════════════════════
         // PLAYER & BULLET MODELS
         // ═══════════════════════════════════════════════════════════
-        function createPlayerModel() {
+        function createPlayerModel(teamColor) {
             const group = new THREE.Group();
-            
+
+            // ── shared materials ───────────────────────────────────
+            const matBean   = new THREE.MeshStandardMaterial({ color: 0x3db554, roughness: 0.55 });
+            const matBeanDk = new THREE.MeshStandardMaterial({ color: 0x2e9640, roughness: 0.55 });
+            const matBlack  = new THREE.MeshBasicMaterial({ color: 0x111111 });
+            const matWhite  = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
+            // ── BODY ───────────────────────────────────────────────
             const body = new THREE.Mesh(
-                new THREE.CapsuleGeometry(CONFIG.PLAYER.RADIUS, 1.4),
-                new THREE.MeshStandardMaterial({ 
-                    color: 0x00ff88,
-                    roughness: 0.7,
-                    metalness: 0.3
-                })
+                new THREE.CapsuleGeometry(CONFIG.PLAYER.RADIUS, 1.0, 8, 16),
+                matBean
             );
-            body.position.y = 0.7;
+            body.position.y = 0.75;
             body.castShadow = true;
-            body.receiveShadow = true;
             group.add(body);
-            
-            const head = new THREE.Mesh(
-                new THREE.SphereGeometry(0.25),
-                new THREE.MeshStandardMaterial({ 
-                    color: 0xffaa00,
-                    emissive: 0xffaa00,
-                    emissiveIntensity: 0.3
-                })
+
+            // belly stripe (face side = -Z)
+            const belly = new THREE.Mesh(
+                new THREE.CapsuleGeometry(CONFIG.PLAYER.RADIUS * 0.65, 0.45, 6, 12),
+                matBeanDk
             );
-            head.position.y = 1.5;
+            belly.position.set(0, 0.75, -CONFIG.PLAYER.RADIUS * 0.78);
+            belly.scale.z = 0.15;
+            group.add(belly);
+
+            // ── HEAD ───────────────────────────────────────────────
+            const head = new THREE.Mesh(
+                new THREE.SphereGeometry(0.30, 14, 14),
+                matBean
+            );
+            head.position.set(0, 1.62, 0);
             head.castShadow = true;
             group.add(head);
-            
+
+            // eyes (face toward -Z)
+            [-0.10, 0.10].forEach(xOff => {
+                const eye = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), matBlack);
+                eye.position.set(xOff, 1.66, -0.27);
+                group.add(eye);
+                const glint = new THREE.Mesh(new THREE.SphereGeometry(0.022, 6, 6), matWhite);
+                glint.position.set(xOff + 0.02, 1.68, -0.30);
+                group.add(glint);
+            });
+
+            // ── TEAM ACCESSORIES ───────────────────────────────────
+            if (teamColor === 't') {
+                // ── RED BANDANA ────────────────────────────────────
+                const matBandana   = new THREE.MeshStandardMaterial({ color: 0xdd2222, roughness: 0.8 });
+                const matBandanaDk = new THREE.MeshStandardMaterial({ color: 0xaa1111, roughness: 0.8 });
+
+                // band wrapping around head
+                const band = new THREE.Mesh(
+                    new THREE.TorusGeometry(0.28, 0.058, 8, 24),
+                    matBandana
+                );
+                band.rotation.x = Math.PI / 2;
+                band.position.set(0, 1.50, 0);
+                group.add(band);
+
+                // knot bumps at the BACK (+Z side)
+                [-0.07, 0.07].forEach(xOff => {
+                    const knot = new THREE.Mesh(
+                        new THREE.SphereGeometry(0.065, 7, 7),
+                        matBandanaDk
+                    );
+                    knot.position.set(xOff, 1.50, 0.27);
+                    group.add(knot);
+                });
+
+                // dangling tail at back
+                const tail = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.03, 0.01, 0.20, 6),
+                    matBandanaDk
+                );
+                tail.position.set(0, 1.34, 0.24);
+                tail.rotation.x = -0.4;
+                group.add(tail);
+
+            } else if (teamColor === 'ct') {
+                // ── BLUE POLICE CAP ────────────────────────────────
+                const matCap   = new THREE.MeshStandardMaterial({ color: 0x1a4dcc, roughness: 0.6 });
+                const matCapDk = new THREE.MeshStandardMaterial({ color: 0x0f3399, roughness: 0.6 });
+                const matBadge = new THREE.MeshStandardMaterial({ color: 0xffcc00, roughness: 0.3, metalness: 0.7 });
+                const matBadgeDk = new THREE.MeshStandardMaterial({ color: 0xcc9900, roughness: 0.3, metalness: 0.6 });
+
+                // dome (upper half-sphere)
+                const dome = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.32, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.52),
+                    matCap
+                );
+                dome.position.set(0, 1.72, 0);
+                group.add(dome);
+
+                // dark band around base of cap
+                const band = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.308, 0.308, 0.07, 20),
+                    matCapDk
+                );
+                band.position.set(0, 1.68, 0);
+                group.add(band);
+
+                // brim sticking out the FRONT (-Z side)
+                const brim = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.38, 0.38, 0.04, 20),
+                    matCapDk
+                );
+                brim.position.set(0, 1.66, -0.12);
+                brim.scale.z = 0.55;
+                group.add(brim);
+
+                // gold badge on front of cap (-Z)
+                const badge = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.14, 0.14, 0.04),
+                    matBadge
+                );
+                badge.position.set(0, 1.74, -0.31);
+                badge.rotation.z = Math.PI / 8;
+                group.add(badge);
+
+                // badge inner detail
+                const badgeInner = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.07, 0.07, 0.05),
+                    matBadgeDk
+                );
+                badgeInner.position.set(0, 1.74, -0.33);
+                group.add(badgeInner);
+            }
+
             scene.add(group);
             return group;
         }

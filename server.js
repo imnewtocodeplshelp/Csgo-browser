@@ -79,6 +79,7 @@ io.on('connection', (socket) => {
         alive: true,
         kills: 0,
         deaths: 0,
+        team: null,
         lastUpdate: Date.now()
     };
     
@@ -93,6 +94,18 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('newPlayer', { 
         id: socket.id, 
         ...players[socket.id]
+    });
+
+    // Handle team selection
+    socket.on('joinTeam', (data) => {
+        if (players[socket.id] && data.team) {
+            players[socket.id].team = data.team;
+            // Broadcast team to all other players so they can update the model
+            socket.broadcast.emit('playerTeamUpdate', {
+                id: socket.id,
+                team: data.team
+            });
+        }
     });
 
     // Handle player movement
